@@ -1,0 +1,28 @@
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Gradle
+.gradle/
+**/build/
+
+# Local machine config
+local.properties
+.vscode/
+.DS_Store
+
+# Native / capture outputs
+.externalNativeBuild/
+.cxx/
+captures/
+
+# Generated app packages
+*.apk
+*.aab
+
+# Signing files
+*.jks
+*.keystore
+
+# Logs
+*.log
