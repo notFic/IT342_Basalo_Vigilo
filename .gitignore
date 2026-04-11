@@ -1,0 +1,31 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS / logs
+.DS_Store
+*.log
+
+# Backend
+backend/vigilo/target/
+backend/vigilo/uploads/
+backend/vigilo/.env
+
+# Web
+web/node_modules/
+web/dist/
+web/.env
+
+# Mobile
+mobile/.gradle/
+mobile/.idea/
+mobile/**/build/
+mobile/local.properties
+mobile/captures/
+mobile/.externalNativeBuild/
+mobile/.cxx/
+
+# Signing
+*.jks
+*.keystore
