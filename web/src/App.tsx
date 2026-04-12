@@ -68,6 +68,10 @@ function App() {
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
   const [isVisitorSubmitting, setIsVisitorSubmitting] = useState(false)
   const [isLogsLoading, setIsLogsLoading] = useState(false)
+  
+  // Modal States
+  const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false)
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false)
 
   useEffect(() => {
     const storedUser = localStorage.getItem(storageKey)
@@ -96,11 +100,6 @@ function App() {
       setIsLogsLoading(false)
     }
   }
-
-  const welcomeName = useMemo(() => {
-    if (!user) return ''
-    return `${user.firstName} ${user.lastName}`.trim()
-  }, [user])
 
   const handleAuthChange = (field: keyof AuthForm, value: string) => {
     setAuthForm((current) => ({ ...current, [field]: value }))
@@ -159,15 +158,12 @@ function App() {
     if (!visitorForm.fullName || !visitorForm.contactNumber || !visitorForm.hostName || !visitorForm.destinationRoom || !visitorForm.purpose) {
       return 'Complete all required visitor fields.'
     }
-
     if (!/^\d{7,15}$/.test(visitorForm.contactNumber)) {
       return 'Contact number must contain 7 to 15 digits only.'
     }
-
     if (!visitorForm.idImage) {
       return 'Upload the visitor ID image before submitting.'
     }
-
     return ''
   }
 
@@ -202,6 +198,7 @@ function App() {
       await createVisitorLog(payload)
       setVisitorForm(initialVisitorForm)
       setDashboardFeedback({ type: 'success', text: 'Visitor check-in saved successfully.' })
+      setIsCheckInModalOpen(false) // Close modal on success
       await loadActiveLogs()
     } catch (error) {
       setDashboardFeedback({
@@ -233,111 +230,64 @@ function App() {
     setUser(null)
     setActiveLogs([])
     setDashboardFeedback({ type: '', text: '' })
+    setIsLogoutModalOpen(false)
   }
 
+  // --- Auth Screens ---
   if (!user) {
     return (
       <div className="auth-shell">
         <div className="auth-card">
-          <div className="brand-block">
-            <span className="eyebrow">Vigilo</span>
-            <h1>{mode === 'login' ? 'Guard Sign-In' : 'Register Staff Account'}</h1>
-            <p className="copy">
-              {mode === 'login'
-                ? 'Access the visitor dashboard to check in guests, monitor active logs, and process departures.'
-                : 'Create a staff account connected to the Spring Boot backend and Supabase PostgreSQL database.'}
-            </p>
+          <div className="auth-header">
+            <div className="auth-logo">logo</div>
+            <h1>Vigilo</h1>
+            <p>Sign in to your account to continue</p>
           </div>
 
           <div className="mode-switch">
-            <button className={mode === 'login' ? 'mode active' : 'mode'} type="button" onClick={() => setMode('login')}>
-              Login
-            </button>
-            <button className={mode === 'register' ? 'mode active' : 'mode'} type="button" onClick={() => setMode('register')}>
-              Register
-            </button>
+            <button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Login</button>
+            <button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Register</button>
           </div>
 
+          {authFeedback.text && <div className={`feedback-alert ${authFeedback.type}`}>{authFeedback.text}</div>}
+
           {mode === 'login' ? (
-            <form className="stack" onSubmit={handleLogin}>
-              <label className="field">
+            <form onSubmit={handleLogin} className="auth-form">
+              <label>
                 <span>Email Address</span>
-                <input
-                  type="email"
-                  value={authForm.email}
-                  onChange={(event) => handleAuthChange('email', event.target.value)}
-                  placeholder="guard@example.com"
-                  required
-                />
+                <input type="email" value={authForm.email} onChange={(e) => handleAuthChange('email', e.target.value)} required />
               </label>
-              <label className="field">
-                <span>Password</span>
-                <input
-                  type="password"
-                  value={authForm.password}
-                  onChange={(event) => handleAuthChange('password', event.target.value)}
-                  placeholder="Enter your password"
-                  required
-                />
+              <label>
+                <div className="label-row">
+                  <span>Password</span>
+                  <a href="#" className="forgot-link">Forgot Password?</a>
+                </div>
+                <input type="password" value={authForm.password} onChange={(e) => handleAuthChange('password', e.target.value)} required />
               </label>
-              {authFeedback.text && <div className={`feedback ${authFeedback.type}`}>{authFeedback.text}</div>}
-              <button className="primary-button" type="submit" disabled={isAuthSubmitting}>
+              <button type="submit" className="primary-btn full-width" disabled={isAuthSubmitting}>
                 {isAuthSubmitting ? 'Signing In...' : 'Login'}
               </button>
+              <div className="divider"><span>or continue with</span></div>
+              <button type="button" className="secondary-btn full-width">Sign in with Google</button>
             </form>
           ) : (
-            <form className="stack" onSubmit={handleRegister}>
-              <div className="split-fields">
-                <label className="field">
-                  <span>First Name</span>
-                  <input
-                    value={authForm.firstName}
-                    onChange={(event) => handleAuthChange('firstName', event.target.value)}
-                    placeholder="Kurt"
-                    required
-                  />
-                </label>
-                <label className="field">
-                  <span>Last Name</span>
-                  <input
-                    value={authForm.lastName}
-                    onChange={(event) => handleAuthChange('lastName', event.target.value)}
-                    placeholder="Basalo"
-                    required
-                  />
-                </label>
-              </div>
-              <label className="field">
-                <span>Email Address</span>
-                <input
-                  type="email"
-                  value={authForm.email}
-                  onChange={(event) => handleAuthChange('email', event.target.value)}
-                  placeholder="guard@example.com"
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Password</span>
-                <input
-                  type="password"
-                  value={authForm.password}
-                  onChange={(event) => handleAuthChange('password', event.target.value)}
-                  placeholder="At least 8 characters"
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Role</span>
-                <select value={authForm.role} onChange={(event) => handleAuthChange('role', event.target.value)}>
-                  <option value="STAFF">Staff</option>
-                  <option value="ADMIN">Admin</option>
-                </select>
-              </label>
-              {authFeedback.text && <div className={`feedback ${authFeedback.type}`}>{authFeedback.text}</div>}
-              <button className="primary-button" type="submit" disabled={isAuthSubmitting}>
-                {isAuthSubmitting ? 'Registering...' : 'Create Account'}
-              </button>
+            <form onSubmit={handleRegister} className="auth-form">
+               <div className="split-row">
+                 <label><span>First Name</span><input value={authForm.firstName} onChange={(e) => handleAuthChange('firstName', e.target.value)} required /></label>
+                 <label><span>Last Name</span><input value={authForm.lastName} onChange={(e) => handleAuthChange('lastName', e.target.value)} required /></label>
+               </div>
+               <label><span>Email Address</span><input type="email" value={authForm.email} onChange={(e) => handleAuthChange('email', e.target.value)} required /></label>
+               <label><span>Password</span><input type="password" value={authForm.password} onChange={(e) => handleAuthChange('password', e.target.value)} required /></label>
+               <label>
+                 <span>Role</span>
+                 <select value={authForm.role} onChange={(e) => handleAuthChange('role', e.target.value)}>
+                   <option value="STAFF">Staff</option>
+                   <option value="ADMIN">Admin</option>
+                 </select>
+               </label>
+               <button type="submit" className="primary-btn full-width" disabled={isAuthSubmitting}>
+                 {isAuthSubmitting ? 'Registering...' : 'Register'}
+               </button>
             </form>
           )}
         </div>
@@ -345,172 +295,182 @@ function App() {
     )
   }
 
+  // --- Dashboard Screens ---
   return (
-    <div className="dashboard-shell">
+    <div className="app-container">
+      {/* Sidebar */}
       <aside className="sidebar">
-        <div>
-          <span className="eyebrow">Vigilo</span>
-          <h1>Active Logs Dashboard</h1>
-          <p className="copy">
-            The main feature of the system is now live on the web: guards can create visitor entries, save them to Supabase through the backend, and process check-out actions in one place.
-          </p>
+        <div className="sidebar-brand">
+          <div className="sidebar-logo">logo</div>
+          <h2>Vigilo</h2>
         </div>
-
-        <div className="profile-card">
-          <span className="eyebrow">Session</span>
-          <strong>{welcomeName}</strong>
-          <span>{user.email}</span>
-          <span className="role-pill">{user.role}</span>
-          <button className="danger-button" type="button" onClick={handleLogout}>
-            Logout
-          </button>
-        </div>
-      </aside>
-
-      <main className="dashboard-main">
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Main Feature</span>
-              <h2>New Visitor Entry</h2>
-            </div>
-            <p className="copy">
-              This form captures the required check-in details from the SDD, validates them, uploads the visitor ID image, and saves the record through the backend API.
-            </p>
+        
+        <nav className="sidebar-nav">
+          <div className="nav-group">
+            <span className="nav-title">Visitor Management</span>
+            <button className="nav-item active">Active Logs</button>
+            <button className="nav-item">Historical Logs</button>
           </div>
 
-          <form className="stack" onSubmit={handleVisitorSubmit}>
-            <div className="grid-two">
-              <label className="field">
-                <span>Full Name</span>
-                <input
-                  value={visitorForm.fullName}
-                  onChange={(event) => handleVisitorChange('fullName', event.target.value)}
-                  placeholder="Juan Dela Cruz"
-                />
-              </label>
-              <label className="field">
-                <span>Contact Number</span>
-                <input
-                  value={visitorForm.contactNumber}
-                  onChange={(event) => handleVisitorChange('contactNumber', event.target.value)}
-                  placeholder="09171234567"
-                />
-              </label>
-              <label className="field">
-                <span>Host Name</span>
-                <input
-                  value={visitorForm.hostName}
-                  onChange={(event) => handleVisitorChange('hostName', event.target.value)}
-                  placeholder="Maria Santos"
-                />
-              </label>
-              <label className="field">
-                <span>Destination / Room</span>
-                <input
-                  value={visitorForm.destinationRoom}
-                  onChange={(event) => handleVisitorChange('destinationRoom', event.target.value)}
-                  placeholder="Room 204"
-                />
-              </label>
-              <label className="field">
-                <span>Visitor Type</span>
-                <select
-                  value={visitorForm.visitorType}
-                  onChange={(event) => handleVisitorChange('visitorType', event.target.value)}
-                >
-                  <option value="Guest">Guest</option>
-                  <option value="Employee">Employee</option>
-                  <option value="Contractor">Contractor</option>
-                  <option value="Courier">Courier</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>ID Image</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(event) => handleVisitorChange('idImage', event.target.files?.[0] ?? null)}
-                />
-              </label>
-            </div>
-
-            <label className="field">
-              <span>Purpose of Visit</span>
-              <textarea
-                rows={4}
-                value={visitorForm.purpose}
-                onChange={(event) => handleVisitorChange('purpose', event.target.value)}
-                placeholder="State the reason for the visit"
-              />
-            </label>
-
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={visitorForm.extendedVisit}
-                onChange={(event) => handleVisitorChange('extendedVisit', event.target.checked)}
-              />
-              <span>Extended Visit</span>
-            </label>
-
-            {dashboardFeedback.text && <div className={`feedback ${dashboardFeedback.type}`}>{dashboardFeedback.text}</div>}
-
-            <button className="primary-button" type="submit" disabled={isVisitorSubmitting}>
-              {isVisitorSubmitting ? 'Saving Visitor Entry...' : 'Submit Check-In'}
-            </button>
-          </form>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Live Data</span>
-              <h2>Active Visitor Logs</h2>
-            </div>
-            <p className="copy">
-              This table reads directly from the backend and shows only visitor records whose status is currently active.
-            </p>
-          </div>
-
-          {isLogsLoading ? (
-            <p className="empty-state">Loading active visitor logs...</p>
-          ) : activeLogs.length === 0 ? (
-            <p className="empty-state">No active logs yet. Submit a visitor check-in to populate this dashboard.</p>
-          ) : (
-            <div className="table-wrap">
-              <table className="logs-table">
-                <thead>
-                  <tr>
-                    <th>Visitor</th>
-                    <th>Type</th>
-                    <th>Host</th>
-                    <th>Destination</th>
-                    <th>Time In</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activeLogs.map((log) => (
-                    <tr key={log.id}>
-                      <td>{log.fullName}</td>
-                      <td>{log.visitorType}</td>
-                      <td>{log.hostName}</td>
-                      <td>{log.destinationRoom}</td>
-                      <td>{new Date(log.timeIn).toLocaleString()}</td>
-                      <td>
-                        <button className="table-button" type="button" onClick={() => handleCheckOut(log.id)}>
-                          Check-Out
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {user.role === 'ADMIN' && (
+            <div className="nav-group">
+              <span className="nav-title">System</span>
+              <button className="nav-item">Admin Dashboard</button>
             </div>
           )}
-        </section>
-      </main>
+        </nav>
+      </aside>
+
+      {/* Main Content Area */}
+      <div className="main-content">
+        
+        {/* Top Header */}
+        <header className="top-header">
+          <div className="api-banner">
+            <strong>Public API banner warning message</strong>
+          </div>
+          <div className="header-toolbar">
+            <input type="text" className="search-bar" placeholder="Search bar" />
+            <div className="user-profile">
+              <span className="role-badge">{user.role === 'ADMIN' ? 'Admin' : 'Staff'} Badge</span>
+              <div className="user-details">
+                <span className="user-name">{user.firstName} {user.lastName}</span>
+                <span className="user-title">{user.role}</span>
+              </div>
+              <button className="dropdown-toggle" onClick={() => setIsLogoutModalOpen(true)}>▼</button>
+            </div>
+          </div>
+        </header>
+
+        {/* Dashboard Body */}
+        <main className="dashboard-body">
+          <div className="page-header">
+            <div>
+              <h1>Active Logs</h1>
+              <p>Currently monitoring {activeLogs.length} active visitors on the premises.</p>
+            </div>
+            <button className="primary-btn" onClick={() => setIsCheckInModalOpen(true)}>New Visitor Check-in</button>
+          </div>
+
+          {dashboardFeedback.text && <div className={`feedback-alert ${dashboardFeedback.type}`}>{dashboardFeedback.text}</div>}
+
+          <div className="table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Visitor Name</th>
+                  <th>Type</th>
+                  <th>Host (Tenant)</th>
+                  <th>Destination/Room</th>
+                  <th>Time in</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isLogsLoading ? (
+                  <tr><td colSpan={6} className="text-center">Loading active visitor logs...</td></tr>
+                ) : activeLogs.length === 0 ? (
+                  <tr><td colSpan={6} className="text-center">No active visitors currently on premises.</td></tr>
+                ) : (
+                  activeLogs.map((log) => (
+                    <tr key={log.id}>
+                      <td>
+                        {log.fullName}
+                        {log.extendedVisit && <span className="extended-tag">Extended</span>}
+                      </td>
+                      <td><span className="type-box">{log.visitorType}</span></td>
+                      <td>{log.hostName}</td>
+                      <td>{log.destinationRoom}</td>
+                      <td>{new Date(log.timeIn).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                      <td>
+                        <button className="action-btn" onClick={() => handleCheckOut(log.id)}>Check out</button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+            <div className="table-footer">
+              Showing {activeLogs.length} of {activeLogs.length} active visitors
+            </div>
+          </div>
+        </main>
+      </div>
+
+      {/* --- Check-In Modal --- */}
+      {isCheckInModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content check-in-modal">
+            <h2>New Visitor Entry</h2>
+            <form onSubmit={handleVisitorSubmit} className="modal-form">
+              <div className="split-row">
+                <label><span>Full Name</span><input value={visitorForm.fullName} onChange={(e) => handleVisitorChange('fullName', e.target.value)} placeholder="John Doe" required/></label>
+                <label><span>Contact Number</span><input value={visitorForm.contactNumber} onChange={(e) => handleVisitorChange('contactNumber', e.target.value)} placeholder="09171234567" required/></label>
+              </div>
+              
+              <div className="form-group-box">
+                <div className="split-row">
+                  <label><span>Host Name (Tenant)</span><input value={visitorForm.hostName} onChange={(e) => handleVisitorChange('hostName', e.target.value)} placeholder="Jane Doe" required/></label>
+                  <label><span>Destination/Room</span><input value={visitorForm.destinationRoom} onChange={(e) => handleVisitorChange('destinationRoom', e.target.value)} placeholder="Search Bar Dropdown" required/></label>
+                </div>
+              </div>
+
+              <div className="split-row align-center">
+                <label>
+                  <span>Visitor Type</span>
+                  <select value={visitorForm.visitorType} onChange={(e) => handleVisitorChange('visitorType', e.target.value)}>
+                    <option value="Guest">Guest</option>
+                    <option value="Employee">Employee</option>
+                    <option value="Contractor">Contractor</option>
+                    <option value="Courier">Courier</option>
+                  </select>
+                </label>
+                <div className="toggle-container">
+                  <label><span>Mark as Extended Visit</span>
+                    <div className="toggle-switch">
+                      <input type="checkbox" checked={visitorForm.extendedVisit} onChange={(e) => handleVisitorChange('extendedVisit', e.target.checked)}/>
+                      <span className="slider"></span>
+                    </div>
+                  </label>
+                  <small>Exempts this visitor from the automated 11:59 PM system checkout.</small>
+                </div>
+              </div>
+
+              <label>
+                <span>Purpose of Visit</span>
+                <textarea rows={3} value={visitorForm.purpose} onChange={(e) => handleVisitorChange('purpose', e.target.value)} required></textarea>
+              </label>
+
+              <label>
+                <span>Visitor ID Attachment</span>
+                <input type="file" accept="image/*" className="file-input" onChange={(e) => handleVisitorChange('idImage', e.target.files?.[0] ?? null)} required/>
+              </label>
+
+              <div className="modal-actions">
+                <button type="button" className="secondary-btn" onClick={() => setIsCheckInModalOpen(false)}>Cancel</button>
+                <button type="submit" className="primary-btn" disabled={isVisitorSubmitting}>
+                  {isVisitorSubmitting ? 'Submitting...' : 'Submit Check-in'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- Logout Modal --- */}
+      {isLogoutModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content logout-modal">
+            <div className="logout-icon">icon</div>
+            <h2>Ready to Leave?</h2>
+            <p>Are you sure you want to log out of your session?<br/>You will need to sign in again to access the dashboard.</p>
+            <div className="modal-actions-center">
+              <button className="secondary-btn" onClick={() => setIsLogoutModalOpen(false)}>Cancel</button>
+              <button className="primary-btn" onClick={handleLogout}>Logout</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
