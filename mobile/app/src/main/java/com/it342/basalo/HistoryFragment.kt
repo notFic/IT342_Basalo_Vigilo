@@ -14,6 +14,12 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.it342.basalo.data.DemoDataStore
 import com.it342.basalo.data.SessionManager
 import com.it342.basalo.ui.HistoryLogsAdapter
+import com.it342.basalo.network.RetrofitClient
+import com.it342.basalo.network.HistoricalResponse
+import com.it342.basalo.data.VisitorRecord
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 
 class HistoryFragment : Fragment(R.layout.fragment_history_logs) {
 
@@ -36,10 +42,16 @@ class HistoryFragment : Fragment(R.layout.fragment_history_logs) {
         val fab = requireActivity().findViewById<FloatingActionButton>(R.id.fabNewVisitor)
 
         adapter = HistoryLogsAdapter(isAdmin = isAdmin) { visitor ->
-            val adminName = profile?.fullName ?: getString(R.string.default_admin_name)
-            DemoDataStore.voidRecord(visitor.logId, adminName)
-            refreshData(searchInput.text.toString(), emptyState)
-            Toast.makeText(requireContext(), R.string.record_voided, Toast.LENGTH_SHORT).show()
+            val adminEmail = profile?.email ?: "admin@vigilo.com"
+            RetrofitClient.visitorApi.voidVisitorLog(visitor.logId, adminEmail).enqueue(object : Callback<VisitorRecord> {
+                override fun onResponse(call: Call<VisitorRecord>, response: Response<VisitorRecord>) {
+                    refreshData(searchInput.text.toString(), emptyState)
+                    Toast.makeText(requireContext(), R.string.record_voided, Toast.LENGTH_SHORT).show()
+                }
+                override fun onFailure(call: Call<VisitorRecord>, t: Throwable) {
+                    Toast.makeText(requireContext(), "Failed to void", Toast.LENGTH_SHORT).show()
+                }
+            })
         }
 
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
@@ -54,8 +66,15 @@ class HistoryFragment : Fragment(R.layout.fragment_history_logs) {
     }
 
     private fun refreshData(query: String, emptyState: TextView) {
-        val items = DemoDataStore.getHistoricalLogs(query)
-        adapter.submitList(items)
-        emptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        RetrofitClient.visitorApi.getHistoricalLogs().enqueue(object : Callback<HistoricalResponse> {
+            override fun onResponse(call: Call<HistoricalResponse>, response: Response<HistoricalResponse>) {
+                val items = response.body()?.content?.filter { it.fullName.contains(query, true) } ?: emptyList()
+                adapter.submitList(items)
+                emptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+            }
+            override fun onFailure(call: Call<HistoricalResponse>, t: Throwable) {
+                emptyState.visibility = View.VISIBLE
+            }
+        })
     }
 }

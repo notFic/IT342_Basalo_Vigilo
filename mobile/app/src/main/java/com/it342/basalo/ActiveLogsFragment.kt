@@ -14,6 +14,11 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.it342.basalo.data.DemoDataStore
 import com.it342.basalo.data.SessionManager
 import com.it342.basalo.ui.ActiveLogsAdapter
+import com.it342.basalo.network.RetrofitClient
+import com.it342.basalo.data.VisitorRecord
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 
 class ActiveLogsFragment : Fragment(R.layout.fragment_active_logs) {
 
@@ -35,10 +40,16 @@ class ActiveLogsFragment : Fragment(R.layout.fragment_active_logs) {
         val fab = requireActivity().findViewById<FloatingActionButton>(R.id.fabNewVisitor)
 
         adapter = ActiveLogsAdapter { visitor ->
-            val userName = sessionManager.getProfile()?.fullName ?: getString(R.string.default_guard_name)
-            DemoDataStore.checkOut(visitor.logId, userName)
-            refreshData(searchInput.text.toString(), emptyState)
-            Toast.makeText(requireContext(), R.string.visitor_checked_out, Toast.LENGTH_SHORT).show()
+            val userEmail = sessionManager.getProfile()?.email ?: "guard@vigilo.com"
+            RetrofitClient.visitorApi.checkOutVisitor(visitor.logId, userEmail).enqueue(object : Callback<VisitorRecord> {
+                override fun onResponse(call: Call<VisitorRecord>, response: Response<VisitorRecord>) {
+                    refreshData(searchInput.text.toString(), emptyState)
+                    Toast.makeText(requireContext(), R.string.visitor_checked_out, Toast.LENGTH_SHORT).show()
+                }
+                override fun onFailure(call: Call<VisitorRecord>, t: Throwable) {
+                    Toast.makeText(requireContext(), "Failed to checkout", Toast.LENGTH_SHORT).show()
+                }
+            })
         }
 
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
@@ -66,8 +77,15 @@ class ActiveLogsFragment : Fragment(R.layout.fragment_active_logs) {
     }
 
     private fun refreshData(query: String, emptyState: TextView) {
-        val items = DemoDataStore.getActiveLogs(query)
-        adapter.submitList(items)
-        emptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        RetrofitClient.visitorApi.getActiveLogs().enqueue(object : Callback<List<VisitorRecord>> {
+            override fun onResponse(call: Call<List<VisitorRecord>>, response: Response<List<VisitorRecord>>) {
+                val items = response.body()?.filter { it.fullName.contains(query, true) } ?: emptyList()
+                adapter.submitList(items)
+                emptyState.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+            }
+            override fun onFailure(call: Call<List<VisitorRecord>>, t: Throwable) {
+                emptyState.visibility = View.VISIBLE
+            }
+        })
     }
 }

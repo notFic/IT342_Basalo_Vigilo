@@ -69,4 +69,22 @@ public class VisitorLogController {
             return ResponseEntity.badRequest().body(exception.getMessage());
         }
     }
+
+    @GetMapping("/history")
+    public ResponseEntity<?> getHistoricalLogs(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size);
+        return ResponseEntity.ok(visitorLogService.getHistoricalLogs(pageable));
+    }
+
+    @PutMapping("/{logId}/void")
+    public ResponseEntity<?> voidVisitorLog(@PathVariable Long logId, @RequestParam String updatedByEmail) {
+        try {
+            return ResponseEntity.ok(visitorLogService.voidVisitorLog(logId, updatedByEmail));
+        } catch (IllegalArgumentException exception) {
+            return ResponseEntity.badRequest().body(exception.getMessage());
+        }
+    }
 }

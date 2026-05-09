@@ -14,6 +14,10 @@ object RetrofitClient {
             .build()
     }
 
+    val visitorApi: VisitorApi by lazy {
+        retrofit.create(VisitorApi::class.java)
+    }
+
     val authApi: AuthApi by lazy {
         retrofit.create(AuthApi::class.java)
     }

@@ -109,3 +109,63 @@ export async function checkOutVisitor(logId: number, updatedByEmail: string): Pr
 
   return parseResponse<VisitorLog>(response)
 }
+
+export type PageResponse<T> = {
+  content: T[]
+  totalPages: number
+  totalElements: number
+}
+
+export async function fetchHistoricalLogs(page: number = 0, size: number = 10): Promise<PageResponse<VisitorLog>> {
+  const query = new URLSearchParams({ page: page.toString(), size: size.toString() }).toString()
+  const response = await fetch(`${API_BASE_URL}/logs/history?${query}`)
+  return parseResponse<PageResponse<VisitorLog>>(response)
+}
+
+export async function voidVisitorLog(logId: number, updatedByEmail: string): Promise<VisitorLog> {
+  const query = new URLSearchParams({ updatedByEmail }).toString()
+  const response = await fetch(`${API_BASE_URL}/logs/${logId}/void?${query}`, {
+    method: 'PUT',
+  })
+
+  return parseResponse<VisitorLog>(response)
+}
+
+export type Location = {
+  id: number
+  areaName: string
+  roomNumber: string
+  floorLevel: string
+}
+
+export type AuditLog = {
+  id: number
+  timestamp: string
+  userEmail: string
+  actionPerformed: string
+  details: string
+}
+
+export async function fetchLocations(): Promise<Location[]> {
+  const response = await fetch(`${API_BASE_URL}/locations`)
+  return parseResponse<Location[]>(response)
+}
+
+export async function addLocation(payload: Omit<Location, 'id'>): Promise<Location> {
+  const response = await fetch(`${API_BASE_URL}/locations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return parseResponse<Location>(response)
+}
+
+export async function fetchStaff(): Promise<UserData[]> {
+  const response = await fetch(`${API_BASE_URL}/users`)
+  return parseResponse<UserData[]>(response)
+}
+
+export async function fetchAuditLogs(): Promise<AuditLog[]> {
+  const response = await fetch(`${API_BASE_URL}/audit`)
+  return parseResponse<AuditLog[]>(response)
+}
