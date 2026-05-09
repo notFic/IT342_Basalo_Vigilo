@@ -1,21 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
-import {
-  checkOutVisitor,
-  createVisitorLog,
-  fetchActiveLogs,
-  loginUser,
-  registerUser,
-  fetchHistoricalLogs,
-  voidVisitorLog,
-  fetchLocations,
-  addLocation,
-  fetchStaff,
-  fetchAuditLogs,
-} from './api'
-import type { Location, AuditLog } from './api'
-import type { AuthResponse, VisitorLog } from './api'
+import { loginUser, registerUser } from './features/auth/authApi'
+import { fetchActiveLogs, fetchHistoricalLogs, createVisitorLog, checkOutVisitor, voidVisitorLog } from './features/visitor/visitorApi'
+import { fetchStaff, fetchLocations, addLocation, fetchAuditLogs } from './features/admin/adminApi'
+import { useGoogleLogin } from '@react-oauth/google'
+import type { AuthResponse, VisitorLog, UserData, Location, AuditLog } from './core/types'
+import { isAdminRole, normalizeRole, normalizeUser } from './core/auth'
 
 type Mode = 'login' | 'register'
 
@@ -66,6 +57,7 @@ const storageKey = 'vigilo-user'
 
 function App() {
   const [mode, setMode] = useState<Mode>('login')
+  const [showPassword, setShowPassword] = useState(false)
   const [authForm, setAuthForm] = useState<AuthForm>(initialAuthForm)
   const [visitorForm, setVisitorForm] = useState<VisitorForm>(initialVisitorForm)
   const [authFeedback, setAuthFeedback] = useState<Feedback>({ type: '', text: '' })
@@ -74,6 +66,7 @@ function App() {
   const [activeLogs, setActiveLogs] = useState<VisitorLog[]>([])
   const [historicalLogs, setHistoricalLogs] = useState<VisitorLog[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectedLog, setSelectedLog] = useState<VisitorLog | null>(null)
   const [holidayBanner, setHolidayBanner] = useState('Checking holiday status...')
   const [activeTab, setActiveTab] = useState<'active' | 'history' | 'staff' | 'locations' | 'audit'>('active')
 
@@ -87,6 +80,8 @@ function App() {
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
   const [isVisitorSubmitting, setIsVisitorSubmitting] = useState(false)
   const [isLogsLoading, setIsLogsLoading] = useState(false)
+  const [isStaffSubmitting, setIsStaffSubmitting] = useState(false)
+  const [isLocationSubmitting, setIsLocationSubmitting] = useState(false)
   
   // Modal States
   const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false)
@@ -113,7 +108,8 @@ function App() {
   useEffect(() => {
     const storedUser = localStorage.getItem(storageKey)
     if (storedUser) {
-      setUser(JSON.parse(storedUser))
+      const parsed = JSON.parse(storedUser) as AuthResponse['data']
+      setUser(parsed ? normalizeUser(parsed) : null)
     }
   }, [])
 
@@ -226,19 +222,55 @@ function App() {
         password: authForm.password,
       })
 
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Login failed.')
+      }
+
+      const normalizedUser = normalizeUser(response.data)
       setAuthFeedback({ type: 'success', text: response.message })
-      setUser(response.data ?? null)
-      localStorage.setItem(storageKey, JSON.stringify(response.data ?? null))
+      setUser(normalizedUser)
+      setActiveTab('active-logs')
+      localStorage.setItem(storageKey, JSON.stringify(normalizedUser))
       setAuthForm(initialAuthForm)
     } catch (error) {
       setAuthFeedback({
         type: 'error',
-        text: error instanceof Error ? error.message : 'Login failed.',
+        text: error instanceof Error && error.message.trim() ? error.message : 'Login failed.',
       })
     } finally {
       setIsAuthSubmitting(false)
     }
   }
+
+  const handleGoogleLogin = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      setAuthFeedback({ type: '', text: '' })
+      setIsAuthSubmitting(true)
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api/v1'}/auth/google`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: tokenResponse.access_token })
+        })
+        const data = await response.json()
+        if (response.ok && data.success) {
+          setAuthFeedback({ type: 'success', text: data.message })
+          setUser(data.data)
+          setActiveTab('active-logs')
+          localStorage.setItem(storageKey, JSON.stringify(data.data))
+        } else {
+          setAuthFeedback({ type: 'error', text: data.message || 'Google login failed.' })
+        }
+      } catch (error) {
+        setAuthFeedback({ type: 'error', text: 'Unable to connect to backend for Google verification.' })
+      } finally {
+        setIsAuthSubmitting(false)
+      }
+    },
+    onError: () => {
+      setAuthFeedback({ type: 'error', text: 'Google Sign-In failed.' })
+    }
+  })
 
   const validateVisitorForm = () => {
     if (!visitorForm.fullName || !visitorForm.contactNumber || !visitorForm.hostName || !visitorForm.destinationRoom || !visitorForm.purpose) {
@@ -297,12 +329,13 @@ function App() {
   }
 
   const handleVoid = async (logId: number) => {
-    if (!user?.email || user.role !== 'ADMIN') return
+    if (!user?.email) return
     if (!window.confirm("Are you sure you want to void this record?")) return;
 
     try {
       await voidVisitorLog(logId, user.email)
       setDashboardFeedback({ type: 'success', text: 'Record voided successfully.' })
+      await loadActiveLogs()
       await loadHistoricalLogs()
     } catch (error) {
       setDashboardFeedback({
@@ -364,13 +397,18 @@ function App() {
                   <span>Password</span>
                   <a href="#" className="forgot-link">Forgot Password?</a>
                 </div>
-                <input type="password" value={authForm.password} onChange={(e) => handleAuthChange('password', e.target.value)} required />
+                <div style={{ position: 'relative' }}>
+                  <input type={showPassword ? "text" : "password"} value={authForm.password} onChange={(e) => handleAuthChange('password', e.target.value)} required style={{ width: '100%', paddingRight: '40px' }} />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer' }} tabIndex={-1}>
+                    {showPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
               </label>
               <button type="submit" className="primary-btn full-width" disabled={isAuthSubmitting}>
-                {isAuthSubmitting ? 'Signing In...' : 'Login'}
+                {isAuthSubmitting ? <span className="btn-progress"><span className="spinner" />Signing In...</span> : 'Login'}
               </button>
               <div className="divider"><span>or continue with</span></div>
-              <button type="button" className="secondary-btn full-width">Sign in with Google</button>
+              <button type="button" className="secondary-btn full-width" onClick={() => handleGoogleLogin()} disabled={isAuthSubmitting}>Sign in with Google</button>
             </form>
           ) : (
             <form onSubmit={handleRegister} className="auth-form">
@@ -379,7 +417,15 @@ function App() {
                  <label><span>Last Name</span><input value={authForm.lastName} onChange={(e) => handleAuthChange('lastName', e.target.value)} required /></label>
                </div>
                <label><span>Email Address</span><input type="email" value={authForm.email} onChange={(e) => handleAuthChange('email', e.target.value)} required /></label>
-               <label><span>Password</span><input type="password" value={authForm.password} onChange={(e) => handleAuthChange('password', e.target.value)} required /></label>
+               <label>
+                 <span>Password</span>
+                 <div style={{ position: 'relative' }}>
+                   <input type={showPassword ? "text" : "password"} value={authForm.password} onChange={(e) => handleAuthChange('password', e.target.value)} required style={{ width: '100%', paddingRight: '40px' }} />
+                   <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer' }} tabIndex={-1}>
+                     {showPassword ? '🙈' : '👁️'}
+                   </button>
+                 </div>
+               </label>
                <label>
                  <span>Role</span>
                  <select value={authForm.role} onChange={(e) => handleAuthChange('role', e.target.value)}>
@@ -388,7 +434,7 @@ function App() {
                  </select>
                </label>
                <button type="submit" className="primary-btn full-width" disabled={isAuthSubmitting}>
-                 {isAuthSubmitting ? 'Registering...' : 'Register'}
+                 {isAuthSubmitting ? <span className="btn-progress"><span className="spinner" />Registering...</span> : 'Register'}
                </button>
             </form>
           )}
@@ -414,7 +460,7 @@ function App() {
             <button className={`nav-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>Historical Logs</button>
           </div>
 
-          {user.role === 'ADMIN' && (
+          {isAdminRole(user.role) && (
             <div className="nav-group">
               <span className="nav-title">System</span>
               <button className={`nav-item ${activeTab === 'staff' ? 'active' : ''}`} onClick={() => setActiveTab('staff')}>Staff Management</button>
@@ -436,10 +482,10 @@ function App() {
           <div className="header-toolbar">
             <input type="text" className="search-bar" placeholder="Search visitors or staff..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             <div className="user-profile">
-              <span className="role-badge">{user.role === 'ADMIN' ? 'Admin' : 'Staff'} Badge</span>
+              <span className="role-badge">{isAdminRole(user.role) ? 'Admin' : 'Staff'} Badge</span>
               <div className="user-details">
                 <span className="user-name">{user.firstName} {user.lastName}</span>
-                <span className="user-title">{user.role}</span>
+                <span className="user-title">{normalizeRole(user.role)}</span>
               </div>
               <button className="dropdown-toggle" onClick={() => setIsLogoutModalOpen(true)}>▼</button>
             </div>
@@ -459,6 +505,11 @@ function App() {
           </div>
 
           {dashboardFeedback.text && <div className={`feedback-alert ${dashboardFeedback.type}`}>{dashboardFeedback.text}</div>}
+          {(isLogsLoading || isVisitorSubmitting || isStaffSubmitting || isLocationSubmitting) && (
+            <div className="page-loading-bar" aria-hidden="true">
+              <span />
+            </div>
+          )}
 
           <div className="table-container">
             <table className="data-table">
@@ -466,7 +517,7 @@ function App() {
                 <>
                   <thead><tr><th>Full Name</th><th>Email Address</th><th>Role</th></tr></thead>
                   <tbody>
-                    {staffList.filter(s => (s.firstName + ' ' + s.lastName).toLowerCase().includes(searchQuery.toLowerCase())).map((s, i) => <tr key={i}><td>{s.firstName} {s.lastName}</td><td>{s.email}</td><td>{s.role}</td></tr>)}
+                    {staffList.filter(s => (s.firstName + ' ' + s.lastName).toLowerCase().includes(searchQuery.toLowerCase())).map((s, i) => <tr key={i}><td>{s.firstName} {s.lastName}</td><td>{s.email}</td><td>{normalizeRole(s.role)}</td></tr>)}
                   </tbody>
                 </>
               ) : activeTab === 'locations' ? (
@@ -502,7 +553,7 @@ function App() {
                   <tr><td colSpan={6} className="text-center">No records found.</td></tr>
                 ) : (
                   (activeTab === 'active' ? activeLogs : historicalLogs).filter(l => l.fullName.toLowerCase().includes(searchQuery.toLowerCase())).map((log) => (
-                    <tr key={log.id}>
+                    <tr key={log.id} onClick={() => setSelectedLog(log)} style={{ cursor: 'pointer' }} className="clickable-row">
                       <td>
                         {log.fullName}
                         {log.extendedVisit && <span className="extended-tag">Extended</span>}
@@ -516,8 +567,8 @@ function App() {
                          <td>{log.status}</td>
                       )}
                       <td>
-                        {activeTab === 'active' && <button className="action-btn" onClick={() => handleCheckOut(log.id)}>Check out</button>}
-                        {activeTab === 'history' && user.role === 'ADMIN' && log.status !== 'Voided' && <button className="action-btn" onClick={() => handleVoid(log.id)}>Void</button>}
+                        {activeTab === 'active' && <button className="action-btn" onClick={(e) => { e.stopPropagation(); handleCheckOut(log.id); }}>Check out</button>}
+                        {activeTab === 'active' && <button className="action-btn void-btn" style={{marginLeft: '8px'}} onClick={(e) => { e.stopPropagation(); handleVoid(log.id); }}>Void</button>}
                       </td>
                     </tr>
                   ))
@@ -591,7 +642,7 @@ function App() {
               <div className="modal-actions">
                 <button type="button" className="secondary-btn" onClick={() => setIsCheckInModalOpen(false)}>Cancel</button>
                 <button type="submit" className="primary-btn" disabled={isVisitorSubmitting}>
-                  {isVisitorSubmitting ? 'Submitting...' : 'Submit Check-in'}
+                  {isVisitorSubmitting ? <span className="btn-progress"><span className="spinner" />Submitting...</span> : 'Submit Check-in'}
                 </button>
               </div>
             </form>
@@ -624,12 +675,17 @@ function App() {
               const target = e.target as typeof e.target & {
                 firstName: { value: string }; lastName: { value: string }; email: { value: string }; password: { value: string }; role: { value: string }
               }
-              await registerUser({
-                firstName: target.firstName.value, lastName: target.lastName.value,
-                email: target.email.value, password: target.password.value, role: target.role.value
-              })
-              setIsStaffModalOpen(false)
-              loadStaff()
+              setIsStaffSubmitting(true)
+              try {
+                await registerUser({
+                  firstName: target.firstName.value, lastName: target.lastName.value,
+                  email: target.email.value, password: target.password.value, role: target.role.value
+                })
+                setIsStaffModalOpen(false)
+                await loadStaff()
+              } finally {
+                setIsStaffSubmitting(false)
+              }
             }}>
               <div className="form-group"><label>First Name</label><input name="firstName" required /></div>
               <div className="form-group"><label>Last Name</label><input name="lastName" required /></div>
@@ -638,7 +694,9 @@ function App() {
               <div className="form-group"><label>Role</label><select name="role"><option value="STAFF">STAFF</option><option value="ADMIN">ADMIN</option></select></div>
               <div className="modal-actions">
                 <button type="button" className="secondary-btn" onClick={() => setIsStaffModalOpen(false)}>Cancel</button>
-                <button type="submit" className="primary-btn">Register User</button>
+                <button type="submit" className="primary-btn" disabled={isStaffSubmitting}>
+                  {isStaffSubmitting ? <span className="btn-progress"><span className="spinner" />Registering...</span> : 'Register User'}
+                </button>
               </div>
             </form>
           </div>
@@ -655,20 +713,60 @@ function App() {
               const target = e.target as typeof e.target & {
                 areaName: { value: string }; roomNumber: { value: string }; floorLevel: { value: string }
               }
-              await addLocation({
-                areaName: target.areaName.value, roomNumber: target.roomNumber.value, floorLevel: target.floorLevel.value
-              })
-              setIsLocationModalOpen(false)
-              loadLocations()
+              setIsLocationSubmitting(true)
+              try {
+                await addLocation({
+                  areaName: target.areaName.value, roomNumber: target.roomNumber.value, floorLevel: target.floorLevel.value
+                })
+                setIsLocationModalOpen(false)
+                await loadLocations()
+              } finally {
+                setIsLocationSubmitting(false)
+              }
             }}>
               <div className="form-group"><label>Area Name</label><input name="areaName" required /></div>
               <div className="form-group"><label>Room Number</label><input name="roomNumber" required /></div>
               <div className="form-group"><label>Floor Level</label><input name="floorLevel" required /></div>
               <div className="modal-actions">
                 <button type="button" className="secondary-btn" onClick={() => setIsLocationModalOpen(false)}>Cancel</button>
-                <button type="submit" className="primary-btn">Add Location</button>
+                <button type="submit" className="primary-btn" disabled={isLocationSubmitting}>
+                  {isLocationSubmitting ? <span className="btn-progress"><span className="spinner" />Saving...</span> : 'Add Location'}
+                </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- Visitor Details Modal --- */}
+      {selectedLog && (
+        <div className="modal-overlay" onClick={() => setSelectedLog(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>Visitor Details</h2>
+            <div className="visitor-details-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '15px' }}>
+              <div className="detail-field"><strong>Full Name:</strong><br/>{selectedLog.fullName}</div>
+              <div className="detail-field"><strong>Contact:</strong><br/>{selectedLog.contactNumber}</div>
+              <div className="detail-field"><strong>Host:</strong><br/>{selectedLog.hostName}</div>
+              <div className="detail-field"><strong>Room:</strong><br/>{selectedLog.destinationRoom}</div>
+              <div className="detail-field"><strong>Type:</strong><br/>{selectedLog.visitorType}</div>
+              <div className="detail-field"><strong>Purpose:</strong><br/>{selectedLog.purpose}</div>
+              <div className="detail-field"><strong>Time In:</strong><br/>{new Date(selectedLog.timeIn).toLocaleString()}</div>
+              {selectedLog.timeOut && <div className="detail-field"><strong>Time Out:</strong><br/>{new Date(selectedLog.timeOut).toLocaleString()}</div>}
+              <div className="detail-field"><strong>Status:</strong><br/>{selectedLog.status}</div>
+            </div>
+            {selectedLog.idImagePath && (
+              <div className="visitor-image-container" style={{ marginTop: '20px', textAlign: 'center' }}>
+                <p style={{marginBottom: '10px'}}><strong>ID Image:</strong></p>
+                <img 
+                  src={`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api/v1'}/logs/images/${selectedLog.idImagePath}`} 
+                  alt="Visitor ID" 
+                  style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px', border: '1px solid #ccc' }} 
+                />
+              </div>
+            )}
+            <div className="modal-actions" style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="button" className="secondary-btn" onClick={() => setSelectedLog(null)}>Close</button>
+            </div>
           </div>
         </div>
       )}

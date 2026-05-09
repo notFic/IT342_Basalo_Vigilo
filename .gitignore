@@ -29,3 +29,7 @@ mobile/.cxx/
 # Signing
 *.jks
 *.keystore
+
+# Python
+__pycache__/
+*.pyc

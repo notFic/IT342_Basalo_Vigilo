@@ -9,8 +9,8 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.chip.Chip
 import com.it342.basalo.R
-import com.it342.basalo.data.VisitorRecord
-import com.it342.basalo.data.VisitorStatus
+import com.it342.basalo.core.data.VisitorRecord
+import com.it342.basalo.core.ui.DisplayFormatter
 
 class HistoryLogsAdapter(
     private val isAdmin: Boolean,
@@ -58,29 +58,25 @@ class HistoryLogsAdapter(
                 item.visitorType,
                 item.hostName
             )
-            timeInText.text = context.getString(R.string.time_in_format, item.timeIn)
+            timeInText.text = context.getString(R.string.time_in_format, DisplayFormatter.formatDateTime(item.timeIn))
             timeOutText.text = context.getString(
                 R.string.time_out_format,
-                item.timeOut ?: context.getString(R.string.still_active)
+                item.timeOut?.let { DisplayFormatter.formatDateTime(it) } ?: context.getString(R.string.still_active)
             )
-            chip.text = formatStatus(item.status)
+            chip.text = DisplayFormatter.formatStatus(item.status)
             chip.chipBackgroundColor = ContextCompat.getColorStateList(context, statusColor(item.status))
 
-            val showButton = isAdmin && item.status != VisitorStatus.VOIDED
+            val showButton = isAdmin && !item.status.equals("Voided", ignoreCase = true)
             voidButton.visibility = if (showButton) View.VISIBLE else View.GONE
             voidButton.setOnClickListener { onVoidRecord(item) }
         }
 
-        private fun formatStatus(status: VisitorStatus): String {
-            return status.name.replace('_', ' ')
-        }
-
-        private fun statusColor(status: VisitorStatus): Int {
+        private fun statusColor(status: String): Int {
             return when (status) {
-                VisitorStatus.CHECKED_OUT -> R.color.status_checked_out
-                VisitorStatus.AUTO_CLOSED -> R.color.status_auto_closed
-                VisitorStatus.VOIDED -> R.color.status_voided
-                VisitorStatus.ACTIVE -> R.color.status_active
+                "Checked-Out" -> R.color.status_checked_out
+                "Auto-Closed" -> R.color.status_auto_closed
+                "Voided" -> R.color.status_voided
+                else -> R.color.status_active
             }
         }
     }

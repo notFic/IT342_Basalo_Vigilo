@@ -14,19 +14,35 @@
         android:textStyle="bold" />
 
     <TextView
+        android:id="@+id/tvActiveSummary"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/active_logs_count_placeholder"
+        android:textColor="@color/text_secondary" />
+
+    <TextView
         android:id="@+id/tvHolidayBanner"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
         android:background="@drawable/bg_banner"
         android:padding="16dp"
-        android:textColor="@color/white" />
+        android:textColor="@color/banner_text"
+        android:textStyle="bold" />
+
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/activeLoadingIndicator"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:visibility="gone" />
 
     <EditText
         android:id="@+id/etActiveSearch"
         android:layout_width="match_parent"
         android:layout_height="52dp"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="12dp"
         android:background="@drawable/bg_input"
         android:hint="@string/search_active_visitors"
         android:inputType="text"

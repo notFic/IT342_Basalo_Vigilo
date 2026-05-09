@@ -18,6 +18,13 @@
             android:text="@string/check_in_description"
             android:textColor="@color/text_secondary" />
 
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/checkInProgress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:visibility="gone" />
+
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
