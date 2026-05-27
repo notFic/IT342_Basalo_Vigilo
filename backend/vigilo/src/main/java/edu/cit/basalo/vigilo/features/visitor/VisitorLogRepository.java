@@ -11,6 +11,8 @@ public interface VisitorLogRepository extends JpaRepository<VisitorLog, Long> {
     List<VisitorLog> findByStatusOrderByTimeInDesc(String status);
     
     Page<VisitorLog> findByStatusNotOrderByTimeInDesc(String status, Pageable pageable);
+
+    Page<VisitorLog> findByStatusNotAndFullNameContainingIgnoreCaseOrderByTimeInDesc(String status, String fullName, Pageable pageable);
     
     List<VisitorLog> findByStatusAndExtendedVisitFalse(String status);
 }

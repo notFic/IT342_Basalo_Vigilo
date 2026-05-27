@@ -1,5 +1,20 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api/v1'
 
+export function withAuthToken(headers: HeadersInit = {}): HeadersInit {
+  const token = localStorage.getItem('vigilo-token')
+  if (token) {
+    return {
+      ...headers,
+      'Authorization': `Bearer ${token}`,
+    }
+  }
+  return headers
+}
+
+export function withRequesterEmail(requesterEmail: string, headers: HeadersInit = {}): HeadersInit {
+  return withAuthToken(headers)
+}
+
 export async function parseResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get('content-type') ?? ''
   const isJson = contentType.includes('application/json')

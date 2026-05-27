@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         setContentView(R.layout.activity_main)
+        com.it342.basalo.core.network.RetrofitClient.setAuthToken(sessionManager.getToken())
 
         val toolbar = findViewById<MaterialToolbar>(R.id.topToolbar)
         drawerLayout = findViewById(R.id.drawerLayout)
@@ -114,3 +115,4 @@ class MainActivity : AppCompatActivity() {
             .commit()
     }
 }
+

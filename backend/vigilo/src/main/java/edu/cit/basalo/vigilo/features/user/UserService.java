@@ -3,26 +3,41 @@ package edu.cit.basalo.vigilo.features.user;
 import edu.cit.basalo.vigilo.features.user.User;
 import edu.cit.basalo.vigilo.features.auth.LoginRequest;
 import edu.cit.basalo.vigilo.features.auth.RegisterRequest;
+import edu.cit.basalo.vigilo.features.notification.NotificationEmailService;
 import edu.cit.basalo.vigilo.features.user.UserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import edu.cit.basalo.vigilo.features.audit.AuditLogService;
 
 @Service
-public class UserService {
+public class UserService implements UserDetailsService {
     private final edu.cit.basalo.vigilo.features.audit.AuditLogService auditLogService;
+    private final NotificationEmailService notificationEmailService;
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, edu.cit.basalo.vigilo.features.audit.AuditLogService auditLogService) {
+    public UserService(
+        UserRepository userRepository,
+        PasswordEncoder passwordEncoder,
+        edu.cit.basalo.vigilo.features.audit.AuditLogService auditLogService,
+        NotificationEmailService notificationEmailService
+    ) {
         this.userRepository = userRepository;
         this.auditLogService = auditLogService;
         this.passwordEncoder = passwordEncoder;
+        this.notificationEmailService = notificationEmailService;
     }
 
-    public void registerUser(RegisterRequest request) {
+    public User registerUser(RegisterRequest request, String requesterEmail) {
+        User requester = requireAdminByEmail(requesterEmail);
+
         if (request.getFirstName() == null || request.getFirstName().isBlank()
             || request.getLastName() == null || request.getLastName().isBlank()
             || request.getEmail() == null || request.getEmail().isBlank()
@@ -44,12 +59,14 @@ public class UserService {
         String hashedPassword = passwordEncoder.encode(request.getPassword());
         newUser.setPasswordHash(hashedPassword);
 
-        userRepository.save(newUser);
+        User savedUser = userRepository.save(newUser);
         auditLogService.logEvent(
-            newUser.getEmail(),
+            requester.getEmail(),
             "USER_CREATED",
-            "Created user account with role " + newUser.getRole()
+            "Created user account " + savedUser.getEmail() + " with role " + savedUser.getRole()
         );
+        notificationEmailService.sendWelcomeEmail(savedUser);
+        return savedUser;
     }
 
     public User authenticate(LoginRequest request) {
@@ -87,5 +104,28 @@ public class UserService {
 
     public User findByEmail(String email) {
         return userRepository.findByEmail(email).orElse(null);
+    }
+
+    public User requireExistingUser(String email) {
+        if (email == null || email.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester email is required.");
+        }
+
+        return userRepository.findByEmail(email.trim())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Requester account was not found."));
+    }
+
+    public User requireAdminByEmail(String email) {
+        User user = requireExistingUser(email);
+        if (!"ADMIN".equalsIgnoreCase(user.getRole())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Administrator access is required.");
+        }
+        return user;
+    }
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        return userRepository.findByEmail(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with email: " + username));
     }
 }

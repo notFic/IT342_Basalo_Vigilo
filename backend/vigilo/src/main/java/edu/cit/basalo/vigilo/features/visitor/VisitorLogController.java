@@ -1,5 +1,7 @@
 package edu.cit.basalo.vigilo.features.visitor;
 
+import java.security.Principal;
+
 import edu.cit.basalo.vigilo.features.visitor.VisitorLog;
 import edu.cit.basalo.vigilo.features.visitor.VisitorLogService;
 import org.springframework.http.ResponseEntity;
@@ -7,26 +9,32 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
-import java.util.List;
+import java.util.Map;
+import edu.cit.basalo.vigilo.features.user.UserService;
 
 @RestController
 @RequestMapping("/api/v1/logs")
 public class VisitorLogController {
 
     private final VisitorLogService visitorLogService;
+    private final UserService userService;
 
-    public VisitorLogController(VisitorLogService visitorLogService) {
+    public VisitorLogController(VisitorLogService visitorLogService, UserService userService) {
         this.visitorLogService = visitorLogService;
+        this.userService = userService;
     }
 
     @PostMapping("/check-in")
     public ResponseEntity<?> checkInVisitor(
+        Principal principal,
         @RequestParam String fullName,
         @RequestParam String contactNumber,
         @RequestParam String hostName,
@@ -34,7 +42,6 @@ public class VisitorLogController {
         @RequestParam String destinationRoom,
         @RequestParam String purpose,
         @RequestParam(defaultValue = "false") boolean extendedVisit,
-        @RequestParam String createdByEmail,
         @RequestParam("idImage") MultipartFile idImage
     ) {
         try {
@@ -46,9 +53,11 @@ public class VisitorLogController {
                 destinationRoom,
                 purpose,
                 extendedVisit,
-                createdByEmail,
+                principal.getName(),
                 idImage
             ));
+        } catch (ResponseStatusException exception) {
+            return ResponseEntity.status(exception.getStatusCode()).body(exception.getReason());
         } catch (IllegalArgumentException exception) {
             return ResponseEntity.badRequest().body(exception.getMessage());
         } catch (IOException exception) {
@@ -57,14 +66,23 @@ public class VisitorLogController {
     }
 
     @GetMapping("/active")
-    public List<VisitorLog> getActiveLogs() {
-        return visitorLogService.getActiveLogs();
+    public ResponseEntity<?> getActiveLogs(Principal principal) {
+        try {
+            return ResponseEntity.ok(visitorLogService.getActiveLogs(principal.getName()));
+        } catch (ResponseStatusException exception) {
+            return ResponseEntity.status(exception.getStatusCode()).body(exception.getReason());
+        }
     }
 
     @PutMapping("/{logId}/check-out")
-    public ResponseEntity<?> checkOutVisitor(@PathVariable Long logId, @RequestParam String updatedByEmail) {
+    public ResponseEntity<?> checkOutVisitor(
+        Principal principal,
+        @PathVariable Long logId
+    ) {
         try {
-            return ResponseEntity.ok(visitorLogService.checkOutVisitor(logId, updatedByEmail));
+            return ResponseEntity.ok(visitorLogService.checkOutVisitor(logId, principal.getName()));
+        } catch (ResponseStatusException exception) {
+            return ResponseEntity.status(exception.getStatusCode()).body(exception.getReason());
         } catch (IllegalArgumentException exception) {
             return ResponseEntity.badRequest().body(exception.getMessage());
         }
@@ -72,19 +90,45 @@ public class VisitorLogController {
 
     @GetMapping("/history")
     public ResponseEntity<?> getHistoricalLogs(
+            Principal principal,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String query
     ) {
         org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size);
-        return ResponseEntity.ok(visitorLogService.getHistoricalLogs(pageable));
+        try {
+            return ResponseEntity.ok(visitorLogService.getHistoricalLogs(pageable, principal.getName(), query));
+        } catch (ResponseStatusException exception) {
+            return ResponseEntity.status(exception.getStatusCode()).body(exception.getReason());
+        }
     }
 
     @PutMapping("/{logId}/void")
-    public ResponseEntity<?> voidVisitorLog(@PathVariable Long logId, @RequestParam String updatedByEmail) {
+    public ResponseEntity<?> voidVisitorLog(
+        Principal principal,
+        @PathVariable Long logId,
+        @RequestParam(required = false) String reason
+    ) {
         try {
-            return ResponseEntity.ok(visitorLogService.voidVisitorLog(logId, updatedByEmail));
+            return ResponseEntity.ok(visitorLogService.voidVisitorLog(logId, principal.getName(), reason));
+        } catch (ResponseStatusException exception) {
+            return ResponseEntity.status(exception.getStatusCode()).body(exception.getReason());
         } catch (IllegalArgumentException exception) {
             return ResponseEntity.badRequest().body(exception.getMessage());
+        }
+    }
+
+    @PostMapping("/auto-close/run")
+    public ResponseEntity<?> runAutoCloseJob(Principal principal) {
+        try {
+            userService.requireAdminByEmail(principal.getName());
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "closedCount", visitorLogService.runAutoCloseJob(),
+                "message", "Auto-close job executed successfully."
+            ));
+        } catch (ResponseStatusException exception) {
+            return ResponseEntity.status(exception.getStatusCode()).body(exception.getReason());
         }
     }
 

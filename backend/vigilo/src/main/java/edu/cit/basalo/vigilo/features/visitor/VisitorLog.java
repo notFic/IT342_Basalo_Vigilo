@@ -51,18 +51,36 @@ public class VisitorLog {
     @Column(name = "time_out")
     private LocalDateTime timeOut;
 
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
     @Column(name = "created_by_email", nullable = false)
     private String createdByEmail;
 
     @Column(name = "updated_by_email")
     private String updatedByEmail;
 
+    @Column(name = "auto_closed")
+    private Boolean autoClosed;
+
     @PrePersist
     protected void onCreate() {
         this.timeIn = LocalDateTime.now();
+        this.createdAt = LocalDateTime.now();
         if (this.status == null || this.status.isBlank()) {
             this.status = "Active";
         }
+        if (this.autoClosed == null) {
+            this.autoClosed = Boolean.FALSE;
+        }
+    }
+
+    @jakarta.persistence.PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
     }
 
     public Long getId() {
@@ -161,6 +179,22 @@ public class VisitorLog {
         this.timeOut = timeOut;
     }
 
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
     public String getCreatedByEmail() {
         return createdByEmail;
     }
@@ -175,5 +209,13 @@ public class VisitorLog {
 
     public void setUpdatedByEmail(String updatedByEmail) {
         this.updatedByEmail = updatedByEmail;
+    }
+
+    public Boolean getAutoClosed() {
+        return autoClosed;
+    }
+
+    public void setAutoClosed(Boolean autoClosed) {
+        this.autoClosed = autoClosed;
     }
 }

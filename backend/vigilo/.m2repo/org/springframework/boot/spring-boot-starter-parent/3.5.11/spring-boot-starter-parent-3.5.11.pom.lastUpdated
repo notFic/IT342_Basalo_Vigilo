@@ -1,0 +1,4 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Tue May 26 00:43:53 GMT+08:00 2026
+@default-central-https\://repo.maven.apache.org/maven2/.lastUpdated=1779727433167
+https\://repo.maven.apache.org/maven2/.error=Could not transfer artifact org.springframework.boot\:spring-boot-starter-parent\:pom\:3.5.11 from/to central (https\://repo.maven.apache.org/maven2)\: D\:\\vs project stuff\\IT342_Basalo_Vigilo\\backend\\vigilo\\.m2repo\\org\\springframework\\boot\\spring-boot-starter-parent\\3.5.11\\spring-boot-starter-parent-3.5.11.pom.11654832228203561137.tmp.8795740235803936614.tmp

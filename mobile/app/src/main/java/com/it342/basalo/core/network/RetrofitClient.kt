@@ -1,13 +1,34 @@
 package com.it342.basalo.core.network
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 object RetrofitClient {
     private const val HOLIDAY_BASE_URL = "https://date.nager.at/api/v3/"
+    private var authToken: String? = null
+
+    fun setAuthToken(token: String?) {
+        this.authToken = token
+    }
+
+    private val authInterceptor = okhttp3.Interceptor { chain ->
+        val requestBuilder = chain.request().newBuilder()
+        authToken?.let {
+            if (it.isNotBlank()) {
+                requestBuilder.addHeader("Authorization", "Bearer " + "$" + "it")
+            }
+        }
+        chain.proceed(requestBuilder.build())
+    }
+
+    private val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor(authInterceptor)
+        .build()
 
     private fun retrofit(): Retrofit =
         Retrofit.Builder()
             .baseUrl(ApiConfigManager.getBaseUrl())
+            .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
 

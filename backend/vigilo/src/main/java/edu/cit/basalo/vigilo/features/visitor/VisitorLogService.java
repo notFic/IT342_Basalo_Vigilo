@@ -1,7 +1,11 @@
 package edu.cit.basalo.vigilo.features.visitor;
 
-import edu.cit.basalo.vigilo.features.visitor.VisitorLog;
-import edu.cit.basalo.vigilo.features.visitor.VisitorLogRepository;
+import edu.cit.basalo.vigilo.common.PageResponse;
+import edu.cit.basalo.vigilo.features.notification.NotificationEmailService;
+import edu.cit.basalo.vigilo.features.settings.AutoCloseSettings;
+import edu.cit.basalo.vigilo.features.settings.AutoCloseSettingsService;
+import edu.cit.basalo.vigilo.features.user.User;
+import edu.cit.basalo.vigilo.features.user.UserService;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -22,6 +26,9 @@ import edu.cit.basalo.vigilo.features.audit.AuditLogService;
 @Service
 public class VisitorLogService {
     private final AuditLogService auditLogService;
+    private final UserService userService;
+    private final NotificationEmailService notificationEmailService;
+    private final AutoCloseSettingsService autoCloseSettingsService;
 
     private static final String ACTIVE_STATUS = "Active";
     private static final String CHECKED_OUT_STATUS = "Checked-Out";
@@ -32,9 +39,18 @@ public class VisitorLogService {
 
     private final VisitorLogRepository visitorLogRepository;
 
-    public VisitorLogService(VisitorLogRepository visitorLogRepository, AuditLogService auditLogService) {
+    public VisitorLogService(
+        VisitorLogRepository visitorLogRepository,
+        AuditLogService auditLogService,
+        UserService userService,
+        NotificationEmailService notificationEmailService,
+        AutoCloseSettingsService autoCloseSettingsService
+    ) {
         this.visitorLogRepository = visitorLogRepository;
         this.auditLogService = auditLogService;
+        this.userService = userService;
+        this.notificationEmailService = notificationEmailService;
+        this.autoCloseSettingsService = autoCloseSettingsService;
     }
 
     public VisitorLog createVisitorLog(
@@ -48,6 +64,7 @@ public class VisitorLogService {
         String createdByEmail,
         MultipartFile idImage
     ) throws IOException {
+        User actor = userService.requireExistingUser(createdByEmail);
         validateCheckIn(fullName, contactNumber, hostName, visitorType, destinationRoom, purpose, createdByEmail, idImage);
 
         VisitorLog visitorLog = new VisitorLog();
@@ -58,21 +75,23 @@ public class VisitorLogService {
         visitorLog.setDestinationRoom(destinationRoom.trim());
         visitorLog.setPurpose(purpose.trim());
         visitorLog.setExtendedVisit(extendedVisit);
-        visitorLog.setCreatedByEmail(createdByEmail.trim());
+        visitorLog.setCreatedByEmail(actor.getEmail());
         visitorLog.setStatus(ACTIVE_STATUS);
+        visitorLog.setAutoClosed(Boolean.FALSE);
         visitorLog.setIdImagePath(storeIdImage(idImage));
 
-        return visitorLogRepository.save(visitorLog);
+        VisitorLog savedLog = visitorLogRepository.save(visitorLog);
+        auditLogService.logEvent(actor.getEmail(), "CHECK_IN", "Created visitor log ID: " + savedLog.getId());
+        return savedLog;
     }
 
-    public List<VisitorLog> getActiveLogs() {
+    public List<VisitorLog> getActiveLogs(String requesterEmail) {
+        userService.requireExistingUser(requesterEmail);
         return visitorLogRepository.findByStatusOrderByTimeInDesc(ACTIVE_STATUS);
     }
 
     public VisitorLog checkOutVisitor(Long logId, String updatedByEmail) {
-        if (updatedByEmail == null || updatedByEmail.isBlank()) {
-            throw new IllegalArgumentException("Updated by email is required.");
-        }
+        User actor = userService.requireExistingUser(updatedByEmail);
 
         VisitorLog visitorLog = visitorLogRepository.findById(logId)
             .orElseThrow(() -> new IllegalArgumentException("Visitor log not found."));
@@ -83,45 +102,125 @@ public class VisitorLogService {
 
         visitorLog.setStatus(CHECKED_OUT_STATUS);
         visitorLog.setTimeOut(LocalDateTime.now());
-        visitorLog.setUpdatedByEmail(updatedByEmail.trim());
+        visitorLog.setUpdatedByEmail(actor.getEmail());
+        visitorLog.setAutoClosed(Boolean.FALSE);
 
-        return visitorLogRepository.save(visitorLog);
+        VisitorLog savedLog = visitorLogRepository.save(visitorLog);
+        auditLogService.logEvent(actor.getEmail(), "CHECK_OUT", "Checked out visitor log ID: " + logId);
+        return savedLog;
     }
 
-    public Page<VisitorLog> getHistoricalLogs(Pageable pageable) {
-        return visitorLogRepository.findByStatusNotOrderByTimeInDesc(ACTIVE_STATUS, pageable);
+    public PageResponse<VisitorLog> getHistoricalLogs(Pageable pageable, String requesterEmail, String query) {
+        userService.requireExistingUser(requesterEmail);
+        Page<VisitorLog> page = isBlank(query)
+            ? visitorLogRepository.findByStatusNotOrderByTimeInDesc(ACTIVE_STATUS, pageable)
+            : visitorLogRepository.findByStatusNotAndFullNameContainingIgnoreCaseOrderByTimeInDesc(ACTIVE_STATUS, query.trim(), pageable);
+        return new PageResponse<>(page);
     }
 
-    public VisitorLog voidVisitorLog(Long logId, String updatedByEmail) {
-        if (updatedByEmail == null || updatedByEmail.isBlank()) {
-            throw new IllegalArgumentException("Updated by email is required.");
-        }
+    public VisitorLog voidVisitorLog(Long logId, String updatedByEmail, String voidReason) {
+        User admin = userService.requireAdminByEmail(updatedByEmail);
 
         VisitorLog visitorLog = visitorLogRepository.findById(logId)
             .orElseThrow(() -> new IllegalArgumentException("Visitor log not found."));
 
-        visitorLog.setStatus(VOIDED_STATUS);
-        visitorLog.setUpdatedByEmail(updatedByEmail.trim());
-        // In a real app, trigger SMTP email here
-        log.info("Sending SMTP Notification: Record {} voided by {}", logId, updatedByEmail);
-        auditLogService.logEvent(updatedByEmail, "VOID_RECORD", "Voided record ID: " + logId);
+        if (VOIDED_STATUS.equals(visitorLog.getStatus())) {
+            throw new IllegalArgumentException("Visitor record is already voided.");
+        }
 
-        return visitorLogRepository.save(visitorLog);
+        visitorLog.setStatus(VOIDED_STATUS);
+        visitorLog.setUpdatedByEmail(admin.getEmail());
+        visitorLog.setAutoClosed(Boolean.FALSE);
+
+        VisitorLog savedLog = visitorLogRepository.save(visitorLog);
+        notificationEmailService.sendVoidNotification(savedLog, admin.getEmail(), voidReason);
+        auditLogService.logEvent(
+            admin.getEmail(),
+            "VOID_RECORD",
+            "Voided record ID: " + logId + (isBlank(voidReason) ? "" : " | Reason: " + voidReason.trim())
+        );
+
+        return savedLog;
     }
 
-    @org.springframework.scheduling.annotation.Scheduled(cron = "0 59 23 * * ?") // 11:59 PM daily
+    @org.springframework.scheduling.annotation.Scheduled(
+        cron = "${app.auto-close.poll-cron:0 * * * * ?}",
+        zone = "${app.auto-close.timezone:Asia/Manila}"
+    )
     public void autoCloseVisitorLogs() {
-        log.info("Running scheduled auto-close job at 11:59 PM");
+        AutoCloseSettings settings = autoCloseSettingsService.getOrCreateSettings();
+        if (settings == null || !settings.isEnabled()) return;
+
+        int staleCount = closeStaleLogs(settings);
+        if (staleCount > 0) {
+            log.info("Auto-closed {} stale logs from previous days.", staleCount);
+        }
+
+        if (autoCloseSettingsService.shouldRunAutoCloseNow(settings)) {
+            runAutoCloseJob();
+        }
+    }
+
+    public int closeStaleLogs(AutoCloseSettings settings) {
+        java.time.ZoneId zoneId = java.time.ZoneId.of(settings.getTimezone());
+        java.time.LocalDate today = java.time.LocalDate.now(zoneId);
+        java.time.LocalTime cutoffTime = autoCloseSettingsService.getCutoffLocalTime(settings);
+        
         List<VisitorLog> activeLogs = visitorLogRepository.findByStatusAndExtendedVisitFalse(ACTIVE_STATUS);
+        List<VisitorLog> staleLogs = new java.util.ArrayList<>();
         
         for (VisitorLog logEntry : activeLogs) {
-            logEntry.setStatus(AUTO_CLOSED_STATUS);
-            logEntry.setTimeOut(LocalDateTime.now().withHour(23).withMinute(59).withSecond(0));
-            logEntry.setUpdatedByEmail("SYSTEM");
-            visitorLogRepository.save(logEntry);
+            java.time.LocalDate logDate = logEntry.getTimeIn().toLocalDate();
+            if (logDate.isBefore(today)) {
+                LocalDateTime correctCutoff = logDate.atTime(cutoffTime);
+                if (logEntry.getTimeIn().isAfter(correctCutoff)) {
+                    correctCutoff = logEntry.getTimeIn();
+                }
+                logEntry.setStatus(AUTO_CLOSED_STATUS);
+                logEntry.setTimeOut(correctCutoff);
+                logEntry.setUpdatedByEmail("SYSTEM");
+                logEntry.setAutoClosed(Boolean.TRUE);
+                staleLogs.add(logEntry);
+            }
         }
+        
+        if (!staleLogs.isEmpty()) {
+            visitorLogRepository.saveAll(staleLogs);
+            auditLogService.logEvent("SYSTEM", "AUTO_CLOSE_STALE", "Closed " + staleLogs.size() + " stale active logs");
+        }
+        return staleLogs.size();
+    }
+
+    public int runAutoCloseJob() {
+        AutoCloseSettings settings = autoCloseSettingsService.getOrCreateSettings();
+        log.info("Running auto-close job using timezone {}", settings.getTimezone());
+        List<VisitorLog> activeLogs = visitorLogRepository.findByStatusAndExtendedVisitFalse(ACTIVE_STATUS);
+        
+        java.time.LocalTime cutoffTime = autoCloseSettingsService.getCutoffLocalTime(settings);
+
+        for (VisitorLog logEntry : activeLogs) {
+            LocalDateTime timeInLocal = logEntry.getTimeIn();
+            java.time.LocalDate logDate = timeInLocal.toLocalDate();
+            LocalDateTime correctCutoff = logDate.atTime(cutoffTime);
+            
+            if (timeInLocal.isAfter(correctCutoff)) {
+                correctCutoff = timeInLocal;
+            }
+
+            logEntry.setStatus(AUTO_CLOSED_STATUS);
+            logEntry.setTimeOut(correctCutoff);
+            logEntry.setUpdatedByEmail("SYSTEM");
+            logEntry.setAutoClosed(Boolean.TRUE);
+        }
+
+        if (!activeLogs.isEmpty()) {
+            visitorLogRepository.saveAll(activeLogs);
+            auditLogService.logEvent("SYSTEM", "AUTO_CLOSE", "Closed " + activeLogs.size() + " active logs");
+        }
+        autoCloseSettingsService.markRunCompleted(settings);
+
         log.info("Auto-closed {} non-extended active visitor logs.", activeLogs.size());
-        if(activeLogs.size() > 0) auditLogService.logEvent("SYSTEM", "AUTO_CLOSE", "Closed " + activeLogs.size() + " active logs");
+        return activeLogs.size();
     }
 
     private void validateCheckIn(

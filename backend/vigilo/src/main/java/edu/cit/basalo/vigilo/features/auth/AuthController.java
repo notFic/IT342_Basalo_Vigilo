@@ -1,14 +1,14 @@
 package edu.cit.basalo.vigilo.features.auth;
 
-import edu.cit.basalo.vigilo.features.auth.LoginRequest;
-import edu.cit.basalo.vigilo.features.auth.RegisterRequest;
 import edu.cit.basalo.vigilo.features.user.User;
 import edu.cit.basalo.vigilo.features.user.UserService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.security.Principal;
 import java.util.Map;
 
 @RestController
@@ -16,17 +16,43 @@ import java.util.Map;
 public class AuthController {
 
     private final UserService userService;
+    private final JwtService jwtService;
+    private final GoogleAuthService googleAuthService;
 
-    public AuthController(UserService userService) {
+    public AuthController(UserService userService, JwtService jwtService, GoogleAuthService googleAuthService) {
         this.userService = userService;
+        this.jwtService = jwtService;
+        this.googleAuthService = googleAuthService;
     }
+    
     @PostMapping("/register")
-    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request) {
+    public ResponseEntity<?> register(
+        Principal principal,
+        @Valid @RequestBody RegisterRequest request
+    ) {
         try {
-            userService.registerUser(request);
+            // Support backward compatibility if principal is null but X-Requester-Email might be used in edge cases
+            // Since we are moving to JWT, principal should not be null if this was authenticated
+            String requesterEmail = principal != null ? principal.getName() : null;
+            if (requesterEmail == null) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized");
+            }
+            User user = userService.registerUser(request, requesterEmail);
             return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                     "success", true,
-                    "message", "User registered successfully!"
+                    "message", "User registered successfully!",
+                    "data", Map.of(
+                        "id", user.getId(),
+                        "email", user.getEmail(),
+                        "firstName", user.getFirstName(),
+                        "lastName", user.getLastName(),
+                        "role", user.getRole()
+                    )
+            ));
+        } catch (ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(Map.of(
+                "success", false,
+                "message", e.getReason()
             ));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
@@ -40,15 +66,19 @@ public class AuthController {
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
         try {
             User user = userService.authenticate(request);
+            String token = jwtService.generateToken(user);
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Login successful!",
                 "data", Map.of(
-                    "id", user.getId(),
-                    "email", user.getEmail(),
-                    "firstName", user.getFirstName(),
-                    "lastName", user.getLastName(),
-                    "role", user.getRole()
+                    "user", Map.of(
+                        "id", user.getId(),
+                        "email", user.getEmail(),
+                        "firstName", user.getFirstName(),
+                        "lastName", user.getLastName(),
+                        "role", user.getRole()
+                    ),
+                    "accessToken", token
                 )
             ));
         } catch (RuntimeException e) {
@@ -59,40 +89,16 @@ public class AuthController {
         }
     }
 
-    @PostMapping("/google")
-    public ResponseEntity<?> googleLogin(@RequestBody Map<String, String> payload) {
+    @GetMapping("/me")
+    public ResponseEntity<?> me(Principal principal) {
         try {
-            String accessToken = payload.get("token");
-            if (accessToken == null || accessToken.isBlank()) throw new RuntimeException("Missing Google token");
-
-            org.springframework.web.client.RestTemplate restTemplate = new org.springframework.web.client.RestTemplate();
-            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
-            headers.setBearerAuth(accessToken);
-            org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(headers);
-            
-            ResponseEntity<Map> googleResponse = restTemplate.exchange(
-                    "https://www.googleapis.com/oauth2/v3/userinfo",
-                    org.springframework.http.HttpMethod.GET,
-                    entity,
-                    Map.class
-            );
-
-            Map<String, Object> userInfo = googleResponse.getBody();
-            if (userInfo == null || !userInfo.containsKey("email")) throw new RuntimeException("Invalid Google Token");
-
-            String email = (String) userInfo.get("email");
-            String firstName = (String) userInfo.getOrDefault("given_name", "Google");
-            String lastName = (String) userInfo.getOrDefault("family_name", "User");
-
-            // Auto-register or authenticate
-            User user = userService.findByEmail(email);
-            if (user == null) {
-                throw new RuntimeException("Unregistered account. Please contact your system administrator.");
+            if (principal == null) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized");
             }
-
+            User user = userService.requireExistingUser(principal.getName());
             return ResponseEntity.ok(Map.of(
                 "success", true,
-                "message", "Google Login successful!",
+                "message", "User loaded successfully.",
                 "data", Map.of(
                     "id", user.getId(),
                     "email", user.getEmail(),
@@ -101,11 +107,39 @@ public class AuthController {
                     "role", user.getRole()
                 )
             ));
-        } catch (Exception e) {
+        } catch (ResponseStatusException exception) {
+            return ResponseEntity.status(exception.getStatusCode()).body(Map.of(
+                "success", false,
+                "message", exception.getReason()
+            ));
+        }
+    }
+
+    @PostMapping("/google")
+    public ResponseEntity<?> googleLogin(@Valid @RequestBody GoogleOAuthRequest request) {
+        try {
+            User user = googleAuthService.authenticateGoogleToken(request.getIdToken());
+            String token = jwtService.generateToken(user);
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Google Login successful!",
+                "data", Map.of(
+                    "user", Map.of(
+                        "id", user.getId(),
+                        "email", user.getEmail(),
+                        "firstName", user.getFirstName(),
+                        "lastName", user.getLastName(),
+                        "role", user.getRole()
+                    ),
+                    "accessToken", token
+                )
+            ));
+        } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
                 "success", false,
-                "message", "Google verification failed: " + e.getMessage()
+                "message", e.getMessage()
             ));
         }
     }
 }
+
